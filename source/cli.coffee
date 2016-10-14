@@ -52,25 +52,80 @@ help = ->
 
     Options:
       --base64 - use base64 encoding for reading and writing encrypted data
+      --config=<path> - use config file specified at <path>. Defaults to boco-encryption.json
 
+    Configuration: json
+      You may configure the encryption using json by specifying the following attributes:
+      * method - the encryption factory method to call (ie: `cipherIv`)
+      * params - the parameters for the factory method
+
+    Configuration: javascript
+      You may configure the encryption using javascript by exporting an async function
+      that returns the BocoEncryption.Encryption instance to use.
+
+      ie: module.exports = function(done) { ... done(null, myEncryption); };
     """
 
+getEncryption = ({configPath}, done) ->
+
+  if configPath?
+    try config = require Path.resolve configPath
+    catch error
+      return done Error("Cannot load config: #{error.message}") if error?
+
+  else
+
+    try
+      defaultJsonConfig = require Path.resolve __dirname, 'boco-encryption.config.json'
+    catch error
+    finally
+      return done Error("Cannot load config: #{error.message}") unless error.code is 'MODULE_NOT_FOUND'
+
+    try
+      defaultJsConfig = require Path.resolve __dirname, 'boco-encryption.config.js'
+    catch error
+    finally
+      return done Error("Cannot load config: #{error.message}") unless error.code is 'MODULE_NOT_FOUND'
+
+    error = null
+
+    config = defaultJsConfig ? defaultJsonConfig
+
+    config ?= {}
+    config.method ?= 'cipherIv'
+    config.params ?= {}
+    config.params.secretKey ?= process.env.BOCO_ENCRYPTION_SECRET_KEY
+
+  if typeof config is 'object'
+    try
+      {method, params} = config
+      encryption = BocoEncryption[method] params
+    catch error
+    finally
+      return done error if error?
+      return done null, encryption
+
+  if typeof config is 'function'
+    return config done
+
+  done Error "Could not create encryption"
+
 main = ->
-
   argv = Minimist process.argv.slice(2)
+  configPath = argv['config']
   [command, str] = argv._
-  config = argv.config ? './boco-encryption.config.js'
 
-  encryption = try require Path.resolve(config)
-  encryption ?= BocoEncryption.cipherIv()
+  getEncryption {configPath}, (error, encryption) ->
+    throw error if error?
+    return help() unless encryption?
 
-  switch command
+    switch command
 
-    when 'encrypt' then encrypt {encryption, str, argv}
-    when 'decrypt' then decrypt {encryption, str, argv}
-    when 'encrypt-stream' then encryptStream {encryption, argv}
-    when 'decrypt-stream' then decryptStream {encryption, argv}
-    else help()
+      when 'encrypt' then encrypt {encryption, str, argv}
+      when 'decrypt' then decrypt {encryption, str, argv}
+      when 'encrypt-stream' then encryptStream {encryption, argv}
+      when 'decrypt-stream' then decryptStream {encryption, argv}
+      else help()
 
 module.exports = {
   main
@@ -80,3 +135,5 @@ module.exports = {
   encryptStream
   decryptStream
 }
+
+return main() unless module?.parent?
