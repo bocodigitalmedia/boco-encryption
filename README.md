@@ -1,2 +1,3 @@
 # boco-encryption
-Encryption library
+
+Encryption library and cli
